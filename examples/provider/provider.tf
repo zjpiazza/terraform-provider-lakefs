@@ -1,0 +1,119 @@
+terraform {
+  required_providers {
+    lakefs = {
+      source = "registry.terraform.io/zjpiazza/lakefs"
+    }
+  }
+}
+
+provider "lakefs" {
+  endpoint          = "http://localhost:8000/api/v1"
+  access_key_id     = var.lakefs_access_key_id
+  secret_access_key = var.lakefs_secret_access_key
+}
+
+variable "lakefs_access_key_id" {
+  description = "LakeFS access key ID"
+  type        = string
+  sensitive   = true
+}
+
+variable "lakefs_secret_access_key" {
+  description = "LakeFS secret access key"
+  type        = string
+  sensitive   = true
+}
+
+# Create a repository
+resource "lakefs_repository" "example" {
+  name              = "my-data-lake"
+  storage_namespace = "s3://my-bucket/lakefs/my-data-lake"
+  default_branch    = "main"
+}
+
+# Create a development branch
+resource "lakefs_branch" "develop" {
+  repository = lakefs_repository.example.id
+  name       = "develop"
+  source     = "main"
+}
+
+# Create a feature branch from develop
+resource "lakefs_branch" "feature" {
+  repository = lakefs_repository.example.id
+  name       = "feature/new-feature"
+  source     = lakefs_branch.develop.name
+}
+
+# Tag a release
+resource "lakefs_tag" "v1" {
+  repository = lakefs_repository.example.id
+  id         = "v1.0.0"
+  ref        = "main"
+}
+
+# Create a user
+resource "lakefs_user" "developer" {
+  user_id = "developer1"
+  email   = "developer1@example.com"
+}
+
+# Create a group
+resource "lakefs_group" "developers" {
+  group_id = "developers"
+}
+
+# Add user to group
+resource "lakefs_group_membership" "developer" {
+  group_id = lakefs_group.developers.id
+  user_id  = lakefs_user.developer.id
+}
+
+# Create a read-only policy
+resource "lakefs_policy" "readonly" {
+  id = "ReadOnlyPolicy"
+
+  statement = [
+    {
+      action   = ["fs:Read*", "fs:List*"]
+      effect   = "allow"
+      resource = "arn:lakefs:fs:::repository/${lakefs_repository.example.id}/*"
+    }
+  ]
+}
+
+# Attach policy to group
+resource "lakefs_group_policy_attachment" "developers_readonly" {
+  group_id  = lakefs_group.developers.id
+  policy_id = lakefs_policy.readonly.id
+}
+
+# Protect the main branch
+resource "lakefs_branch_protection" "main" {
+  repository = lakefs_repository.example.id
+
+  rules = [
+    { pattern = "main" },
+    { pattern = "release-*" }
+  ]
+}
+
+# Outputs
+output "repository_id" {
+  value = lakefs_repository.example.id
+}
+
+output "develop_branch_commit" {
+  value = lakefs_branch.develop.commit_id
+}
+
+output "current_user" {
+  value = data.lakefs_current_user.me.id
+}
+
+# Data sources
+data "lakefs_current_user" "me" {}
+
+data "lakefs_repository" "example" {
+  repository = lakefs_repository.example.id
+}
